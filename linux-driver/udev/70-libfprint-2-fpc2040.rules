@@ -1,0 +1,8 @@
+# Udev rules for FPC Sensor Controller (Disum series)
+# Supports Honor MagicBook X (10a5:a900) and Acer Swift (10a5:e340)
+
+# Honor MagicBook X 14 & X 16 (2024)
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="10a5", ATTR{idProduct}=="a900", ENV{ID_FPRINT_DRIVER}="fpc2040", TAG+="uaccess", MODE="0660", GROUP="plugdev"
+
+# Acer Swift Go / Swift 21
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="10a5", ATTR{idProduct}=="e340", ENV{ID_FPRINT_DRIVER}="fpc2040", TAG+="uaccess", MODE="0660", GROUP="plugdev"

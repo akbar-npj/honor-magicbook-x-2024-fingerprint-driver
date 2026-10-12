@@ -1,0 +1,16 @@
+# Build artifacts
+fpc_disum_tool
+linux-driver/fpc_disum_tool
+*.o
+*.a
+*.so
+
+# Captured fingerprint images
+*.pgm
+*.bmp
+*.png
+
+# Temporary files
+*.swp
+*~
+.DS_Store
