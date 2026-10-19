@@ -76,18 +76,54 @@ enum fpc_dfu_cmd {
 };
 
 /* Endpoints */
-#define FPC_EP_INTERRUPT_IN      0x81
-#define FPC_EP_BULK_IN           0x82
+#define FPC_EP_INTERRUPT_IN      0x81  /* e340 (Acer) */
+#define FPC_EP_BULK_IN           0x82  /* a900 (Honor) */
 
-/* Image Header metadata size (0x22 = 34 bytes) */
-#define FPC_IMG_HEADER_SIZE      34
+/* Event framing: 12-byte header.  NOTE: the a900 (Honor) header is
+ * big-endian and `length` includes the header itself; the e340 (Acer)
+ * header is little-endian. */
+#define FPC_EVENT_HDR_SIZE       12
 
-/* Event Packet Framing Header */
+/* a900 EVT_IMG payload: 12-byte image header + 11264 pixels = a 128x88
+ * capacitive image (128 bytes per scan row), delivered verbatim on the
+ * wire.  The sensor is ~250 dpi; NBIS/LFS is tuned for ~500 dpi, so the
+ * driver 2x-upscales the frame before minutiae extraction (empirically:
+ * 13 minutiae native vs 42 upscaled on the same press). */
+#define FPC_IMG_HDR_SIZE         12
+#define FPC_SENSOR_WIDTH         128
+#define FPC_SENSOR_HEIGHT        88
+#define FPC_IMAGE_BYTES          (FPC_SENSOR_WIDTH * FPC_SENSOR_HEIGHT) /* 11264 */
+#define FPC_RIDGE_WIDTH          (FPC_SENSOR_WIDTH * 2)   /* 256 */
+#define FPC_RIDGE_HEIGHT         (FPC_SENSOR_HEIGHT * 2)  /* 176 */
+
+/* 4-byte session / capture ids exchanged with CMD_INIT / CMD_ARM. */
+#define FPC_INIT_MAGIC           0x10, 0x2f, 0x11, 0x17
+#define FPC_ARM_MAGIC            0x11, 0x2f, 0x11, 0x17
+#define FPC_DISARM_MAGIC         0x12, 0x2f, 0x11, 0x17
+
+/* TLS key derivation constants (NUL terminator included in the length). */
+#define FPC_HMAC_KEY_STR         "FPC_HMAC_KEY"
+#define FPC_HMAC_KEY_LEN         13
+#define FPC_SEALING_KEY_STR      "FPC_SEALING_KEY"
+#define FPC_SEALING_KEY_LEN      16
+
+/* Event Packet Framing Header (a900 is big-endian on the wire) */
 #pragma pack(push, 1)
 struct fpc_packet_header {
     uint32_t event_id;   /* One of enum fpc_event */
-    uint32_t length;     /* Total payload length in bytes */
+    uint32_t length;     /* Total frame length incl. this header */
     uint32_t status;     /* Status / sequence / return code */
+};
+
+/* Blob returned by CMD_GET_TLS_KEY (little-endian offsets). */
+struct fpc_tls_key {
+    uint32_t magic;        /* 0x0dec0ded */
+    uint32_t key_offset;
+    uint32_t key_len;
+    uint32_t aad_offset;
+    uint32_t aad_len;
+    uint32_t sig_offset;
+    uint32_t sig_len;
 };
 #pragma pack(pop)
 

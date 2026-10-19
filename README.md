@@ -101,30 +101,25 @@ sudo make install-udev
 
 Example session output:
 ```
-=== FPC Disum Sensor Linux Driver Utility ===
-[*] Supported targets: Honor MagicBook (10a5:a900), Acer Swift (10a5:e340)
-[+] Found Honor MagicBook sensor: 10a5:a900
-[+] Device opened successfully!
-[+] Claimed interface 0
-[*] Step 1: Initializing sensor (CMD_INIT)...
-[+] Sent CMD_INIT (0x01), val=0x0001, idx=0x0000, len=4
-[*] Step 2: Arming sensor for finger detection (CMD_ARM)...
-[+] Sent CMD_ARM (0x02), val=0x0001, idx=0x0000, len=4
+=== FPC Disum sensor utility ===
+[+] opened 10a5:a900
+[+] bulk IN endpoint 0x82 (mps=64)
+[+] sensor firmware 29.2.26.22
+[+] init result: EVT_INIT_RESULT, 38 bytes
+[+] TLS key signature verified
+[+] PSK derived (32 bytes)
+[*] TLS-PSK handshake (host is TLS server)...
+[+] TLS handshake complete (TLSv1.2)
+[*] sensor armed. Touch the sensor (Ctrl+C to stop).
 
-[+] Sensor ready! Place your finger on the sensor (Press Ctrl+C to stop)...
-
-=========================================
->>> [!] FINGER DETECTED ON SENSOR! <<<
-=========================================
-[*] Requesting image (CMD_GET_IMG)...
-[+] Sent CMD_GET_IMG (0x09), val=0x0000, idx=0x0000, len=0
-[*] Received image packet! Total size: 25634 bytes
-[*] Saved image to honor_fingerprint_001.pgm (25600 bytes, 160x160)
-
---- Finger removed from sensor ---
-[+] Sent CMD_ARM (0x02), val=0x0001, idx=0x0000, len=4
+[<] inner event EVT_FINGER_DWN (0x06), 0 bytes
+>>> FINGER DETECTED <<<
+[<] inner event EVT_IMG (0x08), 11276 bytes
+[+] Saved honor_fingerprint_001.pgm (11264 bytes, 128x88)
 ```
-The captured image is automatically saved as a standard grayscale file `honor_fingerprint_001.pgm`.
+The captured image is saved as a standard grayscale PGM: 11264 pixel bytes,
+forming a 128×88 capacitive image (128 bytes per scan row), delivered
+verbatim on the wire — no unpacking or de-interleaving required.
 
 ---
 
@@ -135,7 +130,8 @@ Using **REA MCP** backed by **Ghidra 12.1.4**, the Windows 11 driver (`fpc_disum
 ### Match-on-Host Architecture
 Unlike Match-on-Chip (MoC) hardware where biometric matching occurs within firmware flash, the Honor MagicBook X sensor operates in Match-on-Host mode:
 - The controller streams raw capacitive image frames to the host OS.
-- In standard operation (`SensorMode=1`), frames are transmitted unencrypted without requiring mandatory Intel SGX / TLS enclaves.
+- Frames are **not** sent in the clear: the session is wrapped in TLS-PSK. The host derives a 32-byte PSK from the sealed blob returned by `CMD_GET_TLS_KEY` (HMAC-SHA256 over `AAD‖sealed_key` with `sha256("FPC_HMAC_KEY")`, then AES-256-CBC unseal with `sha256("FPC_SEALING_KEY")`, zero IV, no padding).
+- The roles are reversed compared with the Acer `e340`: on `a900` the **host is the TLS server** and the device is the client, so the host calls `SSL_set_accept_state()` and supplies the PSK from a server callback.
 - On Linux, **libfprint** natively incorporates the NIST Biometric Image Software (NBIS) minutiae extraction and matching engine (`fpi_image_device`), removing the need for proprietary closed-source matching blobs.
 
 ### Decompiled Command Dispatcher (`FUN_180018c38`)
@@ -182,7 +178,9 @@ char * FUN_180018c38(int param_1) {
 ```
 
 ### Decompiled Event Parser (`FUN_180018ea8`)
-Decompiled from the Endpoint `0x81` interrupt callback loop via REA `procedure_pseudo_code`:
+Decompiled from the vendor driver's event-dispatch loop via REA `procedure_pseudo_code`
+(the Windows driver polls endpoint `0x81`, but the device as enumerated on Linux
+delivers the same events on bulk `0x82`):
 
 ```c
 char * FUN_180018ea8(int param_1) {
@@ -227,21 +225,42 @@ char * FUN_18000f4b0(int param_1) {
 
 ### Image Capture Workflow & Framing
 ```
-Host                     Sensor (10a5:a900)
- |                               |
- |-- CMD_INIT (0x01) ----------->|
- |<-- EVT_INIT_RESULT (0x02) ----|
- |-- CMD_ARM (0x02) ------------>|
- |<-- EVT_ARM_RESULT (0x03) -----|
+Host (TLS server)                Sensor (10a5:a900)
+ |-- CMD_INDICATE_S_STATE (0x08), val 0x0010 -->|
+ |-- GET_STATE (0x50) ------------------------>|
+ |<-- 72-byte state block ---------------------|
+ |-- CMD_INIT (0x01) + 10 2f 11 17 ---------->|
+ |<-- EVT_INIT_RESULT (0x02), 38 bytes --------|
+ |-- CMD_GET_TLS_KEY (0x0B) ------------------>|
+ |<-- sealed PSK blob -------------------------|
+ |-- CMD_TLS_INIT (0x05) --------------------->|
+ |<-- EVT_TLS: ClientHello --------------------|
+ |--- TLS-PSK handshake (host accepts) ------->|
+ |-- CMD_ARM (0x02) + 11 2f 11 17 ----------->|
+ |<-- EVT_ARM_RESULT (0x03) -------------------|
  |                               |  [User touches sensor]
- |<-- EVT_FINGER_DWN (0x06) -----|
- |-- CMD_GET_IMG (0x09) -------->|
- |<-- EVT_IMG (0x08) ------------|  [34-byte metadata + raw grayscale pixel buffer]
- |                               |  [User lifts finger]
- |<-- EVT_FINGER_UP (0x07) ------|
+ |<-- EVT_FINGER_DWN (0x06) -------------------|
+ |-- CMD_GET_IMG (0x09) ---------------------->|
+ |<-- EVT_IMG (0x08) --------------------------|  [12-byte image header + 11264 px]
 ```
 
-The image frame within `EVT_IMG` begins with a **34-byte metadata header (`0x22`)**, followed immediately by raw 8-bit grayscale pixel bytes (`length - 34`).
+The `EVT_IMG` payload begins with a **12-byte image header**, followed by 11264
+8-bit grayscale pixels that form a **128×88** capacitive ridge image, copied
+verbatim (no unpacking required).
+
+**Sensor resolution and NBIS scaling:** the sensor runs at ~250 dpi, but
+libfprint's NBIS/LFS minutiae detector is tuned for ~500 dpi.  At native
+resolution only 7–18 minutiae are found per press (bozorth3 genuine-match
+scores 5–7 — too marginal to match reliably).  The driver therefore 2×
+bilinear-upscales each frame to 256×176 (ppmm = 19.685) before handing it to
+libfprint, which yields 41–71 minutiae per press and genuine-match scores of
+15–30 (`bz3_threshold = 15`).  Verified live: enroll 5/5 stages, then 4/4
+consecutive `verify-match`.
+
+All event headers are **big-endian** `{u32 code, u32 total_len, u32 status}`,
+where `total_len` includes the 12-byte header. Note that firmware 22.26.2.29
+does **not** emit `EVT_FINGER_UP`; the driver treats the image as the end of the
+press (and debounces the duplicate `EVT_FINGER_DWN` the firmware re-sends).
 
 ---
 
@@ -261,14 +280,27 @@ The driver [`linux-driver/src/fpc2040.c`](file:///home/shaanair/Projects/FingerP
    cp /path/to/linux-driver/include/fpc_protocol.h libfprint/drivers/
    ```
 
-3. **Register in `libfprint/meson.build`:**
-   Add `'fpc2040'` to the list of drivers in `libfprint/meson.build`.
+3. **Register the driver in `meson.build`** (both files, plus the OpenSSL helper):
+   ```meson
+   # top-level meson.build, in drivers_info:
+   'fpc2040': { 'helper': ['openssl'] },
+
+   # libfprint/meson.build, in driver_sources:
+   'fpc2040' : files('drivers/fpc2040.c'),
+   ```
 
 4. **Build and Install:**
    ```bash
    meson setup builddir -Ddrivers=all
    ninja -C builddir
    sudo ninja -C builddir install
+   sudo ldconfig
+   ```
+
+   Verify the ID table was picked up:
+   ```bash
+   ./builddir/libfprint/fprint-list-supported-devices | grep 10a5
+   # 10a5:a900 | Fingerprint Cards Disum (Honor MagicBook X)
    ```
 
 5. **Restart `fprintd` and Enroll:**
