@@ -14,6 +14,22 @@ Linux driver, reverse-engineering findings, automated build toolchain, and stand
 
 ---
 
+## 📚 Documentation map
+
+| Document | Read it for |
+| :--- | :--- |
+| **`RE_GUIDE.md`** | The deep reverse-engineering write-up: USB transport, big-endian event framing, TLS-PSK with the host as server, PSK unsealing, how 128×88 was proven, why the frame needs a 2× upscale, and the libfprint driver design. |
+| **`CROSS_DISTRO_BUILD_GUIDE.md`** | Building and installing on **Debian, Fedora and Arch**: dependencies, registering the driver in Meson, install paths, udev, fprintd, SDDM/GDM login screen, and the **KWallet** consequences of biometric login. |
+| **`README.md`** (this file) | Quickstart, build-script reference, and the REA/Ghidra findings summary. |
+
+> **Heads-up before you log in with a finger:** fingerprint authentication
+> produces no password, so `pam_kwallet5` cannot unlock KWallet. The first
+> secret an application needs (typically the Wi-Fi passphrase, which
+> NetworkManager stores *agent-owned* in the wallet) will prompt for your
+> password. See `CROSS_DISTRO_BUILD_GUIDE.md` §8 for the fix.
+
+---
+
 ## 📑 Table of Contents
 - [1. Quickstart: Automated Build (`build.sh`)](#1-quickstart-automated-build-buildsh)
 - [2. Manual Compilation Instructions](#2-manual-compilation-instructions)
@@ -319,13 +335,31 @@ The driver [`linux-driver/src/fpc2040.c`](file:///home/shaanair/Projects/FingerP
      sudo pam-auth-update
      ```
 
+7. **KWallet does not follow you to biometric login:**
+   `pam_kwallet5` unlocks the wallet by replaying the password it captured
+   during PAM authentication. `pam_fprintd` never sets `PAM_AUTHTOK`, so after a
+   fingerprint login the wallet stays locked and the first application that
+   needs a secret — usually NetworkManager fetching the Wi-Fi passphrase —
+   prompts for your password. Fix it by storing the PSK system-side:
+
+   ```bash
+   sudo nmcli connection modify "<SSID>" wifi-sec.psk 'YOUR_WIFI_PASSWORD'
+   sudo nmcli connection modify "<SSID>" wifi-sec.psk-flags 0
+   ```
+
+   Full explanation, including the GDM-specific `pam_kwallet5` addition, in
+   `CROSS_DISTRO_BUILD_GUIDE.md` §8.
+
 ---
 
 ## 5. Repository Structure
 
 ```
 ├── build.sh                                # Automated build & dependency installer
-├── README.md                               # Complete findings & setup guide
+├── README.md                               # Findings summary, quickstart, doc map
+├── RE_GUIDE.md                             # Deep reverse-engineering write-up
+├── CROSS_DISTRO_BUILD_GUIDE.md             # Build/install on Debian, Fedora, Arch
+├── deploy_honor.sh                         # rsync driver into a libfprint tree + rebuild
 ├── Readme.txt                              # Original driver notes
 ├── linux-driver/
 │   ├── build.sh                            # Local build script
