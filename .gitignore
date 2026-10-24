@@ -9,6 +9,19 @@ linux-driver/fpc_disum_tool
 *.pgm
 *.bmp
 *.png
+*.raw
+
+# Vendor driver packages and binaries (not redistributable)
+*.zip
+*.dll
+*.exe
+*.sys
+*.cat
+*.cer
+*.docx
+FPCFingerPrint*
+FingerPrint*
+FPCFingerprint*
 
 # Temporary files
 *.swp

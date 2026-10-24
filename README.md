@@ -371,7 +371,6 @@ The driver [`linux-driver/src/fpc2040.c`](file:///home/shaanair/Projects/FingerP
 │   │   └── fpc2040.c                       # Native libfprint driver
 │   └── udev/
 │       └── 70-libfprint-2-fpc2040.rules    # Hardware udev permissions
-└── FPCFingerprint_Driver_22.26.2.29/       # Extracted vendor Windows driver package
 ```
 
 ---
