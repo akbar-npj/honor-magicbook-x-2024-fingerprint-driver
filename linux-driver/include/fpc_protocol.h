@@ -90,6 +90,7 @@ enum fpc_dfu_cmd {
  * driver 2x-upscales the frame before minutiae extraction (empirically:
  * 13 minutiae native vs 42 upscaled on the same press). */
 #define FPC_IMG_HDR_SIZE         12
+#define FPC_IMG_HEADER_SIZE      FPC_IMG_HDR_SIZE
 #define FPC_SENSOR_WIDTH         128
 #define FPC_SENSOR_HEIGHT        88
 #define FPC_IMAGE_BYTES          (FPC_SENSOR_WIDTH * FPC_SENSOR_HEIGHT) /* 11264 */
